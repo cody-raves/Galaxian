@@ -65,6 +65,17 @@ try:
         reminder_sent BOOLEAN DEFAULT FALSE
     )
     ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS rsvp_users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        event_id INT NOT NULL,
+        user_id BIGINT NOT NULL,
+        rsvp_time DATETIME NOT NULL,
+        FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
+    )
+    ''')
+
     conn.commit()
 
     # Attach connection to bot

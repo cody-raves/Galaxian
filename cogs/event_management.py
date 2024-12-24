@@ -24,18 +24,20 @@ class RSVPCog(commands.Cog):
         """Load existing events and reminders into memory at startup."""
         cursor = self.bot.conn.cursor()
         cursor.execute("""
-            SELECT message_id, channel_id, reminder_time, name, crew_name, flyer_url, crew_logo_url, location, event_date, start_time, age_requirement, cover_fee, contact_info, event_type
+            SELECT message_id, channel_id, reminder_time, name, crew_name, flyer_url, crew_logo_url, location, event_date, start_time, end_time, age_requirement, cover_fee, contact_info, event_type
             FROM events
             WHERE reminder_sent = 0
         """)
         events = cursor.fetchall()
 
         for event in events:
-            message_id, channel_id, reminder_time, name, crew_name, flyer_url, crew_logo_url, location, event_date, start_time, age_requirement, cover_fee, contact_info, event_type = event
+            message_id, channel_id, reminder_time, name, crew_name, flyer_url, crew_logo_url, location, event_date, start_time, end_time, age_requirement, cover_fee, contact_info, event_type = event
 
-            self.event_messages[message_id] = channel_id  # Track the event message
+            # Convert times to PST for display
+            start_time = datetime.fromisoformat(start_time).astimezone(PST)
+            end_time = datetime.fromisoformat(end_time).astimezone(PST)
 
-            # Prepare the event data and store it in the reminders list
+            # Prepare event data
             event_data = {
                 "name": name,
                 "crew_name": crew_name,
@@ -44,12 +46,16 @@ class RSVPCog(commands.Cog):
                 "location": location,
                 "date": event_date,
                 "start_time": start_time,
+                "end_time": end_time,
                 "age_requirement": age_requirement,
                 "cover_fee": cover_fee,
                 "info": contact_info,
                 "type": event_type,
             }
-            self.reminders.append((reminder_time, channel_id, message_id, event_data))
+
+            # Add to reminders and message tracking
+            self.reminders.append((datetime.fromisoformat(reminder_time).astimezone(UTC), channel_id, message_id, event_data))
+            self.event_messages[message_id] = channel_id
 
         print(f"Loaded {len(self.reminders)} reminders and {len(self.event_messages)} events into RSVP system.")
 
@@ -111,9 +117,10 @@ class RSVPCog(commands.Cog):
                                 if user != self.bot.user:
                                     users_to_notify.append(user)
 
+                    start_time_pst = event_data["start_time"]
+
                     for user in users_to_notify:
                         try:
-                            start_time_pst = event_data["start_time"].astimezone(PST)
                             await user.send(
                                 f"Reminder: The event '{event_data['name']}' is happening soon! Here are the details:\n\n"
                                 f"**Location**: {event_data['location']}\n"
@@ -271,18 +278,31 @@ class EventCog(commands.Cog):
                     await event_channel.send("Invalid date format. Please use MM-DD-YYYY.")
 
             while True:
-                msg = await ask_question("Please provide the start time of the event (e.g., 12pm or 1:30am) in PST:")
+                msg = await ask_question("Please provide the start time of the event (e.g., 12am or 1:30am) in PST:")
                 try:
-                    event_data["start_time"] = self.parse_time(msg.content)
+                    # Parse the time input and combine it with the event date
+                    naive_start_time = datetime.combine(event_data["date"], self.parse_time(msg.content))
+                    
+                    # Ensure the time is explicitly localized to PST
+                    start_time_pst = PST.localize(naive_start_time)
+                    
+                    # Store both the PST and UTC times for clarity
+                    event_data["start_time"] = start_time_pst.astimezone(UTC)  # Convert to UTC for storage
+                    print(f"Debug Start Time (PST): {start_time_pst}")
+                    print(f"Debug Start Time (UTC): {event_data['start_time']}")
                     break
                 except ValueError:
-                    await event_channel.send("Invalid time format. Please use formats like 12pm, 1:30am.")
+                    await event_channel.send("Invalid time format. Please use formats like 12am, 1:30am.")
 
-            while True:
+            while True:  # Loop for end time
                 msg = await ask_question("Please provide the end time of the event (e.g., 12pm or 1:30am) in PST:")
                 try:
-                    event_data["end_time"] = self.parse_time(msg.content)
-                    break
+                    end_time_pst = PST.localize(datetime.combine(event_data["date"], self.parse_time(msg.content)))
+                    if end_time_pst <= event_data["start_time"].astimezone(PST):
+                        await event_channel.send("End time must be after the start time. Please try again.")
+                    else:
+                        event_data["end_time"] = end_time_pst.astimezone(UTC)  # Convert to UTC for storage
+                        break
                 except ValueError:
                     await event_channel.send("Invalid time format. Please use formats like 12pm, 1:30am.")
 
@@ -308,16 +328,36 @@ class EventCog(commands.Cog):
             msg = await ask_question("When should we send a reminder? (e.g., 2 hours, 30 minutes):")
             while True:
                 try:
-                    time_value, time_unit = msg.content.split()[0], msg.content.split()[1].lower()
-                    reminder_delta = (
-                        timedelta(hours=int(time_value)) if "hour" in time_unit else timedelta(minutes=int(time_value))
-                    )
+                    # Split input into value and unit
+                    time_parts = msg.content.lower().split()
+                    if len(time_parts) != 2:
+                        raise ValueError("Invalid format")
 
-                    start_time_pst = PST.localize(datetime.combine(event_data["date"], event_data["start_time"]))
-                    start_time_utc = start_time_pst.astimezone(pytz.utc)
+                    time_value = int(time_parts[0])  # First part should be an integer
+                    time_unit = time_parts[1]  # Second part should be a time unit
 
+                    # Check the time unit and calculate the delta
+                    if "hour" in time_unit:
+                        reminder_delta = timedelta(hours=time_value)
+                    elif "min" in time_unit or "minute" in time_unit:
+                        reminder_delta = timedelta(minutes=time_value)
+                    else:
+                        raise ValueError("Invalid time unit")
+
+                    # Directly use the stored start_time (already in UTC)
+                    start_time_utc = event_data["start_time"]
+
+                    # Calculate UTC reminder time
                     reminder_time_utc = start_time_utc - reminder_delta
-                    if reminder_time_utc < datetime.now(pytz.utc):
+                    current_time_utc = datetime.now(UTC)
+
+                    # Debugging logs
+                    print(f"Start Time (UTC): {start_time_utc}")
+                    print(f"Reminder Delta: {reminder_delta}")
+                    print(f"Reminder Time (UTC): {reminder_time_utc}")
+                    print(f"Current Time (UTC): {current_time_utc}")
+
+                    if reminder_time_utc <= current_time_utc:
                         await event_channel.send("Reminder time must be in the future. Please provide a valid time.")
                         msg = await ask_question("When should we send a reminder? (e.g., 2 hours, 30 minutes):")
                     else:
@@ -339,7 +379,7 @@ class EventCog(commands.Cog):
             embed.add_field(name="Location", value=event_data["location"], inline=True)
             embed.add_field(name="Type", value=event_data["type"], inline=True)
             embed.add_field(name="Date", value=event_data["date"].strftime("%m-%d-%Y"), inline=True)
-            embed.add_field(name="Time", value=f"{event_data['start_time'].strftime('%I:%M %p')} - {event_data['end_time'].strftime('%I:%M %p')} PST", inline=True)
+            embed.add_field(name="Time", value=f"{start_time_pst.strftime('%I:%M %p')} - {end_time_pst.strftime('%I:%M %p')} PST", inline=True)
             embed.add_field(name="Age Requirement", value=event_data["age_requirement"], inline=True)
             embed.add_field(name="Cover Fee", value=event_data["cover_fee"], inline=True)
             embed.add_field(
