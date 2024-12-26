@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands, tasks
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pytz
 
 PST = pytz.timezone('America/Los_Angeles')
@@ -22,6 +22,20 @@ class RSVPCog(commands.Cog):
         self.event_monitor_task.cancel()
         print("RSVPCog tasks unloaded.")
 
+    def ensure_datetime(self, value):
+        """Ensure the value is a datetime object."""
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            return datetime.fromisoformat(value)
+        if isinstance(value, date):  # Handle `date` type
+            return datetime.combine(value, datetime.min.time(), UTC)
+        if isinstance(value, timedelta):  # Handle `timedelta` type
+            return datetime.min + value
+        if value is None:
+            raise ValueError("Encountered None when expecting a datetime string or object.")
+        raise TypeError(f"Unsupported type for datetime conversion: {type(value)}")
+
     async def load_rsvp_events(self):
         """Load existing events and reminders into memory at startup."""
         cursor = self.bot.conn.cursor(dictionary=True)
@@ -34,6 +48,7 @@ class RSVPCog(commands.Cog):
         print("Loading RSVP events from the database...")
         for event in events:
             self.event_messages[event["message_id"]] = event["channel_id"]
+
             event_data = {
                 "event_id": event["event_id"],
                 "name": event["name"],
@@ -41,15 +56,16 @@ class RSVPCog(commands.Cog):
                 "flyer": event["flyer_url"],
                 "crew_logo": event["crew_logo_url"],
                 "location": event["location"],
-                "date": event["event_date"],
-                "start_time": event["start_time"],
-                "end_time": event["end_time"],
+                "date": self.ensure_datetime(event["event_date"]),
+                "start_time": self.ensure_datetime(event["start_time"]),
+                "end_time": self.ensure_datetime(event["end_time"]),
                 "age_requirement": event["age_requirement"],
                 "cover_fee": event["cover_fee"],
                 "info": event["contact_info"],
                 "type": event["event_type"],
             }
-            self.reminders.append((event["reminder_time"], event["channel_id"], event["message_id"], event_data))
+            reminder_time = self.ensure_datetime(event["reminder_time"])
+            self.reminders.append((reminder_time, event["channel_id"], event["message_id"], event_data))
             print(f"Loaded event: {event_data['name']} (Message ID: {event['message_id']})")
 
         print(f"Finished loading {len(events)} events into RSVP system.")
@@ -164,15 +180,16 @@ class RSVPCog(commands.Cog):
                 "flyer": event["flyer_url"],
                 "crew_logo": event["crew_logo_url"],
                 "location": event["location"],
-                "date": event["event_date"],
-                "start_time": event["start_time"],
-                "end_time": event["end_time"],
+                "date": self.ensure_datetime(event["event_date"]),
+                "start_time": self.ensure_datetime(event["start_time"]),
+                "end_time": self.ensure_datetime(event["end_time"]),
                 "age_requirement": event["age_requirement"],
                 "cover_fee": event["cover_fee"],
                 "info": event["contact_info"],
                 "type": event["event_type"],
             }
-            self.reminders.append((event["reminder_time"], event["channel_id"], event["message_id"], event_data))
+            reminder_time = self.ensure_datetime(event["reminder_time"])
+            self.reminders.append((reminder_time, event["channel_id"], event["message_id"], event_data))
             print(f"New event added: {event_data['name']} (Message ID: {event['message_id']})")
 
     @commands.Cog.listener()
