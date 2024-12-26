@@ -93,16 +93,23 @@ class RSVPCog(commands.Cog):
     @tasks.loop(seconds=30)
     async def reminder_task(self):
         """Send reminders for events."""
+        print(f"[Reminder Task] Loop started at {datetime.now(UTC)}")
         now_utc = datetime.now(UTC)
         print(f"[Reminder Task] Current Time (UTC): {now_utc}")
         reminders_to_remove = []
 
         for reminder in self.reminders:
             reminder_time_utc, channel_id, message_id, event_data = reminder
-            print(f"[Reminder Task] Checking Event: {event_data['name']}, Reminder Time: {reminder_time_utc}, Current Time: {now_utc}")
+            print(f"[Reminder Task] Checking Reminder:")
+            print(f"    Event Name: {event_data['name']}")
+            print(f"    Reminder Time (UTC): {reminder_time_utc}")
+            print(f"    Current Time (UTC): {now_utc}")
+            print(f"    Channel ID: {channel_id}")
+            print(f"    Message ID: {message_id}")
 
+            # Check if it's time to send the reminder
             if now_utc >= reminder_time_utc:
-                print(f"[Reminder Task] Sending Reminder for Event: {event_data['name']}")
+                print(f"[Reminder Task] Triggering reminder for event: {event_data['name']}")
                 cursor = self.bot.conn.cursor(dictionary=True)
                 cursor.execute("""
                     SELECT user_id FROM rsvp_users
@@ -110,11 +117,14 @@ class RSVPCog(commands.Cog):
                 """, (event_data["event_id"],))
                 users = cursor.fetchall()
 
+                print(f"[Reminder Task] Found {len(users)} user(s) to notify.")
+
                 for user in users:
                     discord_user = self.bot.get_user(int(user["user_id"]))
                     if discord_user:
                         try:
                             start_time_pst = event_data["start_time"].astimezone(PST)
+                            print(f"[Reminder Task] Sending reminder to user: {discord_user.name}")
                             await discord_user.send(
                                 f"Reminder: The event '{event_data['name']}' is happening soon! Here are the details:\n\n"
                                 f"**Location**: {event_data['location']}\n"
@@ -128,11 +138,15 @@ class RSVPCog(commands.Cog):
 
                 cursor.execute("UPDATE events SET reminder_sent = true WHERE event_id = %s", (event_data["event_id"],))
                 self.bot.conn.commit()
+                print(f"[Reminder Task] Updated reminder_sent in database for event: {event_data['name']}")
                 reminders_to_remove.append(reminder)
 
+        # Clean up reminders that were sent
         for reminder in reminders_to_remove:
             self.reminders.remove(reminder)
-            print(f"[Reminder Task] Reminder for Event: {reminder[3]['name']} removed from active list.")
+            print(f"[Reminder Task] Removed reminder for Event: {reminder[3]['name']} from active reminders.")
+
+        print(f"[Reminder Task] Loop ended at {datetime.now(UTC)}")
 
     @tasks.loop(minutes=5)
     async def cleanup_task(self):
