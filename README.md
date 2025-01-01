@@ -1,19 +1,32 @@
-<h1 align="center">galaxian</h1>
+# **Galaxian**
 
-###
+_A Discord bot for managing underground rave events, invites, and RSVP's – acting like a hybrid interactive rave info line._
 
-<p align="center">a underground rave discord bot that manages events, invites and RSVP's acting like a hybrid interactive rave info line</p>
+---
 
-###
+## **Features**
 
-<h2 align="center">Features:</h2>
+### **Invites**
+- Handles all invites related to the server.
+- Limits users to **one invite per 30 days** by reacting to a central embed.
+- Each invite is a **one-time use only**.
 
-###
+### **Events**
+- Users with the "Promoter" role can use the `!newevent` command.
+- A private channel is created to ask all relevant questions before posting the event embed.
 
-<p align="center">Invites<br>handles all invites related to a server<br>limiting one invite per user every 30 days by reacting to a central embed<br>each invite is one time use<br><br>Events<br>users with role promoter can use !newevent command<br>it creates a private channel to ask relevant questions before posting the emebed<br><br>RSVP's<br>all events posted will have reaction based RSVP's <br>this triggers based on the time set by the promoters during the questions phase<br><br>this bot uses SQL to store everything and it seperated into smaller cogs for easy debug and re-working</p>
+### **RSVPs**
+- All event posts have reaction-based RSVP functionality.
+- RSVP reminders are triggered based on the time set by promoters during the event creation phase.
 
-###
+---
 
-<p align="center">currently the bot is hardcoded with specifc channel ids and images used for a specific discord. but you can easily modify them on your own</p>
+### **Technical Details**
+- The bot uses **SQL** for data persistence, ensuring reliability and flexibility.
+- It is divided into **modular cogs** for easier debugging and updates.
 
-###
+---
+
+### **Current Limitations**
+- The bot is currently hardcoded with specific channel IDs and images for a particular Discord server.
+- You can easily modify these to adapt the bot to your own server.
