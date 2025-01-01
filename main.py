@@ -13,6 +13,7 @@ intents.reactions = True
 intents.guilds = True
 intents.members = True
 intents.invites = True
+intents.presences = True  # For tracking bot status
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Set up MySQL database connection
@@ -53,8 +54,8 @@ try:
         crew_logo_url TEXT,
         location VARCHAR(255),
         event_date DATE,
-        start_time TIME,
-        end_time TIME,
+        start_time DATETIME,  -- Changed from TIME to DATETIME
+        end_time DATETIME,    -- Changed from TIME to DATETIME
         age_requirement VARCHAR(10),
         cover_fee VARCHAR(255),
         reminder_time DATETIME,
@@ -88,40 +89,25 @@ except mysql.connector.Error as err:
 
 # Load extensions (cogs)
 async def load_cogs():
-    for cog in ["cogs.embed_management", "cogs.event_management", "cogs.invite_system", "cogs.rsvp_system"]:
+    cogs = ["cogs.embed_management", "cogs.event_management", "cogs.invite_system", "cogs.rsvp_system"]
+    for cog in cogs:
         try:
             await bot.load_extension(cog)
             print(f"Loaded cog: {cog}")
         except Exception as e:
             print(f"Failed to load cog {cog}: {e}")
 
-    # Add confirmation messages after each successful load
-    if "cogs.event_management" in bot.cogs:
-        print("EventCog has successfully connected and is ready.")
-    if "cogs.invite_system" in bot.cogs:
-        print("InviteSystemCog has successfully connected and is ready.")
-    if "cogs.embed_management" in bot.cogs:
-        print("EmbedManagementCog has successfully connected and is ready.")
-    if "cogs.rsvp_system" in bot.cogs:
-        print("RSVPCog has successfully connected and is ready.")
-
 @bot.event
 async def on_ready():
     print(f"{bot.user.name} has connected to Discord and is ready.")
 
     # Log time information
-    # System time
     system_time = time.ctime()
     tz_name = time.tzname
-
-    # UTC time
     utc_now = datetime.now(pytz.utc)
-
-    # PST time
     pst = pytz.timezone('America/Los_Angeles')
     pst_now = utc_now.astimezone(pst)
 
-    # Log to console
     print(f"System time: {system_time} (Time Zone: {tz_name})")
     print(f"Current UTC time: {utc_now}")
     print(f"Current PST time: {pst_now}")
@@ -137,12 +123,14 @@ async def on_ready():
             f"Current PST time: {pst_now.strftime('%Y-%m-%d %I:%M %p')} PST"
         )
 
+    # Load cogs dynamically
+    await load_cogs()
+
 @bot.event
-async def on_close():
+async def on_disconnect():
     conn.close()
     print("Database connection closed.")
 
 # Running the bot
 if __name__ == "__main__":
-    asyncio.run(load_cogs())
     bot.run("-")  # Replace with your bot token

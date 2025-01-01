@@ -93,98 +93,6 @@ class RSVPCog(commands.Cog):
 
             print(f"Added new event to RSVP system: message_id={message_id}, channel_id={channel_id}")
 
-    @tasks.loop(minutes=1)
-    async def reminder_task(self):
-        """Send reminders for events."""
-        now_utc = datetime.now(UTC)
-        reminders_to_remove = []
-
-        for reminder in self.reminders:
-            reminder_time_utc, channel_id, message_id, event_data = reminder
-
-            if now_utc >= reminder_time_utc:
-                channel = self.bot.get_channel(channel_id)
-                if not channel:
-                    continue
-
-                try:
-                    message = await channel.fetch_message(message_id)
-                    users_to_notify = []
-
-                    for reaction in message.reactions:
-                        if str(reaction.emoji) == "\u2705":
-                            async for user in reaction.users():
-                                if user != self.bot.user:
-                                    users_to_notify.append(user)
-
-                    start_time_pst = event_data["start_time"]
-
-                    for user in users_to_notify:
-                        try:
-                            await user.send(
-                                f"Reminder: The event '{event_data['name']}' is happening soon! Here are the details:\n\n"
-                                f"**Location**: {event_data['location']}\n"
-                                f"**Date**: {start_time_pst.strftime('%m-%d-%Y')}\n"
-                                f"**Start Time**: {start_time_pst.strftime('%I:%M %p')} PST\n"
-                                f"**Contact Info**: {event_data['info']}"
-                            )
-                        except discord.Forbidden:
-                            print(f"Failed to send reminder to {user.name}; they may have DMs disabled.")
-
-                    cursor = self.bot.conn.cursor()
-                    cursor.execute("UPDATE events SET reminder_sent = 1 WHERE message_id = %s", (message_id,))
-                    self.bot.conn.commit()
-                    reminders_to_remove.append(reminder)
-
-                except discord.NotFound:
-                    print(f"Message with ID {message_id} not found. Cleaning up.")
-                    cursor = self.bot.conn.cursor()
-                    cursor.execute("DELETE FROM events WHERE message_id = %s", (message_id,))
-                    self.bot.conn.commit()
-                    reminders_to_remove.append(reminder)
-
-        for reminder in reminders_to_remove:
-            self.reminders.remove(reminder)
-
-    @tasks.loop(minutes=5)
-    async def cleanup_task(self):
-        """Clean up expired events."""
-        now = datetime.now(PST)
-        cursor = self.bot.conn.cursor()
-
-        cursor.execute("SELECT * FROM events WHERE event_date <= %s AND end_time <= %s", (now.date(), now.time()))
-        expired_events = cursor.fetchall()
-        for event in expired_events:
-            channel = self.bot.get_channel(event[14])
-            if channel:
-                try:
-                    message = await channel.fetch_message(event[13])
-                    await message.delete()
-                except (discord.NotFound, discord.Forbidden):
-                    pass
-
-            cursor.execute("DELETE FROM events WHERE message_id = %s", (event[13],))
-            self.bot.conn.commit()
-
-    @tasks.loop(minutes=1)
-    async def event_monitor_task(self):
-        """Check for new events and add them to memory."""
-        await self.check_for_new_events()
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload):
-        """Handle RSVP reactions."""
-        if payload.message_id in self.event_messages and str(payload.emoji) == "\u2705":
-            guild = self.bot.get_guild(payload.guild_id)
-            member = guild.get_member(payload.user_id)
-            if member:
-                try:
-                    await member.send(
-                        "You have successfully RSVPed to the event! We'll send you a reminder closer to the event date."
-                    )
-                except discord.Forbidden:
-                    print(f"Failed to DM {member.name}. DMs might be disabled.")
-
 async def setup(bot):
     cog = RSVPCog(bot)
     await cog.load_rsvp_events()
@@ -297,12 +205,18 @@ class EventCog(commands.Cog):
             while True:  # Loop for end time
                 msg = await ask_question("Please provide the end time of the event (e.g., 12pm or 1:30am) in PST:")
                 try:
-                    end_time_pst = PST.localize(datetime.combine(event_data["date"], self.parse_time(msg.content)))
-                    if end_time_pst <= event_data["start_time"].astimezone(PST):
-                        await event_channel.send("End time must be after the start time. Please try again.")
-                    else:
-                        event_data["end_time"] = end_time_pst.astimezone(UTC)  # Convert to UTC for storage
-                        break
+                    # Parse the time input and combine it with the event date
+                    naive_end_time = datetime.combine(event_data["date"], self.parse_time(msg.content))
+                    end_time_pst = PST.localize(naive_end_time)
+                    
+                    # Handle overnight events
+                    if end_time_pst <= start_time_pst:
+                        end_time_pst += timedelta(days=1)
+                    
+                    event_data["end_time"] = end_time_pst.astimezone(UTC)  # Convert to UTC for storage
+                    print(f"Debug End Time (PST): {end_time_pst}")
+                    print(f"Debug End Time (UTC): {event_data['end_time']}")
+                    break
                 except ValueError:
                     await event_channel.send("Invalid time format. Please use formats like 12pm, 1:30am.")
 
@@ -411,45 +325,48 @@ class EventCog(commands.Cog):
             # Post event publicly
             final_message = await post_channel.send(embed=embed)
             await final_message.add_reaction("\u2705")
+            
+            # Save to database
+            cursor = self.bot.conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT INTO events (name, crew_name, flyer_url, crew_logo_url, location, event_date, start_time, end_time, age_requirement, cover_fee, contact_info, event_type, reminder_time, message_id, channel_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (
+                    event_data["name"], event_data["crew_name"], event_data["flyer"], event_data["crew_logo"], event_data["location"],
+                    event_data["date"], event_data["start_time"], event_data["end_time"], event_data["age_requirement"],
+                    event_data["cover_fee"], event_data["info"], event_data["type"], event_data["reminder_time"], final_message.id, post_channel.id
+                ))
+                self.bot.conn.commit()
+                print(f"Event saved to database: {event_data['name']} (Message ID: {final_message.id})")
+            except Exception as e:
+                print(f"Failed to save event to database: {e}")
+
+            # Fetch the event_id of the newly created event
+            cursor = self.bot.conn.cursor(dictionary=True)  # Use dictionary=True for row dictionaries
+            cursor.execute("""
+                SELECT event_id FROM events
+                WHERE message_id = %s
+            """, (final_message.id,))
+            result = cursor.fetchone()
+
+            if not result:
+                raise ValueError(f"Failed to fetch event_id for message_id: {final_message.id}")
+
+            event_id = result["event_id"]  # Access event_id using dictionary key
+
+            # Update the event_data dictionary with the event_id
+            event_data["event_id"] = event_id
+
+            await event_channel.delete()
 
             # Dynamically register the event with the RSVP cog
-            event_data = {
-                "name": event_data["name"],
-                "crew_name": event_data["crew_name"],
-                "flyer": event_data["flyer"],
-                "crew_logo": event_data["crew_logo"],
-                "location": event_data["location"],
-                "date": event_data["date"],
-                "start_time": event_data["start_time"],
-                "end_time": event_data["end_time"],  # Include end_time
-                "age_requirement": event_data["age_requirement"],
-                "cover_fee": event_data["cover_fee"],
-                "info": event_data["info"],
-                "type": event_data["type"],
-                "reminder_time": event_data["reminder_time"],  # Include reminder time
-            }
-
-            # Call the register_event method from RSVPCog
             await self.bot.rsvp_cog.register_event(
                 message_id=final_message.id,
                 channel_id=post_channel.id,
                 reminder_time=event_data["reminder_time"],
                 event_data=event_data,
             )
-
-            # Save to database
-            cursor = self.bot.conn.cursor()
-            cursor.execute('''
-                INSERT INTO events (name, crew_name, flyer_url, crew_logo_url, location, event_date, start_time, end_time, age_requirement, cover_fee, contact_info, event_type, reminder_time, message_id, channel_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (
-                event_data["name"], event_data["crew_name"], event_data["flyer"], event_data["crew_logo"], event_data["location"],
-                event_data["date"], event_data["start_time"], event_data["end_time"], event_data["age_requirement"],
-                event_data["cover_fee"], event_data["info"], event_data["type"], event_data["reminder_time"], final_message.id, post_channel.id
-            ))
-            self.bot.conn.commit()
-
-            await event_channel.delete()
 
             # Send DM to promoter
             try:
