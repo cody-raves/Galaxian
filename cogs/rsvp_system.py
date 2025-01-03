@@ -62,23 +62,29 @@ class RSVPCog(commands.Cog):
 
     @tasks.loop(seconds=59)
     async def update_status_task(self):
-        """Update bot status to indicate reminder loop status."""
+        """Update bot status to reflect reminder loop and SQL connection status."""
         try:
-            print(f"[Status Task] Loop triggered at {datetime.now()}. Checking reminder_task status...")
-            if self.reminder_task.is_running():
-                print("[Status Task] Reminder task is running.")
-                status_message = "🟢"
-            else:
-                print("[Status Task] Reminder task is NOT running.")
-                status_message = "🔴"
-            
+            # Check reminder loop status
+            reminder_status = "🟢" if self.reminder_task.is_running() else "🔴"
+
+            # Check SQL connection status
+            try:
+                self.bot.conn.ping(reconnect=True, attempts=3, delay=5)
+                sql_status = "✅"
+            except Exception as e:
+                sql_status = "❌"
+                print(f"[SQL Connection Check] Failed: {e}")
+
+            # Alternate status display
+            status_message = reminder_status if datetime.now().second % 2 == 0 else sql_status
+
             # Set activity with status message
             activity = discord.Activity(type=discord.ActivityType.watching, name=status_message)
             await self.bot.change_presence(activity=activity)
             print(f"[Status Task] Status updated to: {status_message}")
         except Exception as e:
             print(f"[Status Task] Error updating status: {e}")
-
+            
     def cog_unload(self):
         if self.reminder_task.is_running():
             self.reminder_task.cancel()

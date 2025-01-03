@@ -1,6 +1,7 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import mysql.connector
+from mysql.connector import Error
 import asyncio
 from datetime import datetime
 import pytz
@@ -13,79 +14,105 @@ intents.reactions = True
 intents.guilds = True
 intents.members = True
 intents.invites = True
-intents.presences = True  # For tracking bot status
+intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Function to create a MySQL connection
+def connect_to_database():
+    try:
+        conn = mysql.connector.connect(
+            host='-',         # Replace with your server IP or hostname
+            user='-',         # Replace with your MySQL username
+            password='-',     # Replace with your MySQL password
+            database='-'      # Replace with your MySQL database name
+        )
+        print("Connected to the database successfully.")
+        return conn
+    except mysql.connector.Error as err:
+        print(f"Error: Could not connect to the database. {err}")
+        return None
+
 # Set up MySQL database connection
-try:
-    conn = mysql.connector.connect(
-        host='-',         # Replace with your server IP or hostname
-        user='-',         # Replace with your MySQL username
-        password='-',     # Replace with your MySQL password
-        database='-'      # Replace with your MySQL database name
-    )
-    cursor = conn.cursor()
-
-    # Create tables if they do not exist
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS embeds (
-        id VARCHAR(255) PRIMARY KEY,
-        message_id BIGINT,
-        channel_id BIGINT
-    )
-    ''')
-
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS invites (
-        user_id VARCHAR(255) PRIMARY KEY,
-        last_invite DATETIME,
-        invite_url TEXT,
-        inviter VARCHAR(255),
-        invitee TEXT
-    )
-    ''')
-
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS events (
-        event_id INT PRIMARY KEY AUTO_INCREMENT,
-        name VARCHAR(255) NOT NULL,
-        crew_name VARCHAR(255) NOT NULL,
-        flyer_url TEXT,
-        crew_logo_url TEXT,
-        location VARCHAR(255),
-        event_date DATE,
-        start_time DATETIME,  -- Changed from TIME to DATETIME
-        end_time DATETIME,    -- Changed from TIME to DATETIME
-        age_requirement VARCHAR(10),
-        cover_fee VARCHAR(255),
-        reminder_time DATETIME,
-        contact_info TEXT,
-        event_type VARCHAR(255),
-        message_id BIGINT,
-        channel_id BIGINT,
-        reminder_sent BOOLEAN DEFAULT FALSE
-    )
-    ''')
-
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS rsvp_users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        event_id INT NOT NULL,
-        user_id BIGINT NOT NULL,
-        rsvp_time DATETIME NOT NULL,
-        FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
-    )
-    ''')
-
-    conn.commit()
-
-    # Attach connection to bot
-    bot.conn = conn
-    bot.cursor = cursor
-
-except mysql.connector.Error as err:
-    print(f"Error: Could not connect to the database. {err}")
+conn = connect_to_database()
+if conn is None:
+    print("Failed to establish a database connection. Exiting.")
     exit(1)
+
+cursor = conn.cursor()
+
+# Create tables if they do not exist
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS embeds (
+    id VARCHAR(255) PRIMARY KEY,
+    message_id BIGINT,
+    channel_id BIGINT
+)
+''')
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS invites (
+    user_id VARCHAR(255) PRIMARY KEY,
+    last_invite DATETIME,
+    invite_url TEXT,
+    inviter VARCHAR(255),
+    invitee TEXT
+)
+''')
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS events (
+    event_id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    crew_name VARCHAR(255) NOT NULL,
+    flyer_url TEXT,
+    crew_logo_url TEXT,
+    location VARCHAR(255),
+    event_date DATE,
+    start_time DATETIME,
+    end_time DATETIME,
+    age_requirement VARCHAR(10),
+    cover_fee VARCHAR(255),
+    reminder_time DATETIME,
+    contact_info TEXT,
+    event_type VARCHAR(255),
+    message_id BIGINT,
+    channel_id BIGINT,
+    reminder_sent BOOLEAN DEFAULT FALSE
+)
+''')
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS rsvp_users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event_id INT NOT NULL,
+    user_id BIGINT NOT NULL,
+    rsvp_time DATETIME NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
+)
+''')
+
+conn.commit()
+
+# Attach connection to bot
+bot.conn = conn
+bot.cursor = cursor
+
+# Connection monitoring task
+@tasks.loop(minutes=1)
+async def monitor_database_connection():
+    """Ensure the MySQL connection remains active."""
+    global conn, cursor
+    try:
+        conn.ping(reconnect=True, attempts=3, delay=2)
+        print("Database connection is active.")
+    except Error as err:
+        print(f"Database connection lost: {err}. Reconnecting...")
+        conn = connect_to_database()
+        if conn:
+            cursor = conn.cursor()
+            bot.conn = conn
+            bot.cursor = cursor
+            print("Database reconnected successfully.")
 
 # Load extensions (cogs)
 async def load_cogs():
@@ -122,6 +149,9 @@ async def on_ready():
             f"Current UTC time: {utc_now.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
             f"Current PST time: {pst_now.strftime('%Y-%m-%d %I:%M %p')} PST"
         )
+
+    # Start the database monitoring task
+    monitor_database_connection.start()
 
     # Load cogs dynamically
     await load_cogs()

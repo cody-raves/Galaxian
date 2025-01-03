@@ -50,11 +50,43 @@ class EmbedManagement(commands.Cog):
                 except Exception as e:
                     print(f"create_new_embed: Failed to fetch old message. Error: {e}")
 
-        # Create embed content
+                # Create embed content
         embed = discord.Embed(
-            description="Embed rules and content here...",
+            title="Rules and Invite System",
+            description="",
             color=discord.Color.from_str('#00FFE4')
         )
+        
+        # Add rules section
+        embed.add_field(
+            name="Rules\n\n",
+            value=(
+                "• Follow Discord Community Guidelines and do not violate Terms of Service. This includes avoiding discussions on illegal activity or condoning violent, extremist groups.\n"
+                "• Do not discriminate against anyone based on race, identity, or gender. Fascist views are not tolerated.\n"
+                "• Don't gatekeep.\n"
+                "• Do not backseat mod.\n"
+                "• When upset by someone's actions or views, do not start a slap fight and blow it out of proportion. Rather be constructive and tell them how to improve.\n"
+                "• Additionally, if you dislike/disagree with someone, do not rely on cheap insults (such as body-shaming comments). Focus on critiquing their character instead.\n"
+                "• If punished, be civil. If you feel a decision is unjust, contact a moderator under the admin or mod roles.\n\n\n"
+            ),
+            inline=False
+        )
+        
+        # Add invite system section
+        embed.add_field(
+            name="Invite System\n\n",
+            value=(
+                "• One invite per user every 30 days.\n"
+                "• Each invite is one-time use.\n"
+                "• React with <:QR:1308590029844648007> to create a QR invite."
+            ),
+            inline=False
+        )
+
+        # Add the image and logo
+        embed.set_image(url="https://i.ibb.co/nMMpjpy/darknetloop.gif")  # Main image
+        embed.set_thumbnail(url="https://i.ibb.co/kH0pNxh/outlet.gif")  # Thumbnail/logo
+
 
         # Update or send new embed
         if old_message:
