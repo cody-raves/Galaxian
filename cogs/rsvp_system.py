@@ -60,19 +60,19 @@ class RSVPCog(commands.Cog):
 
         print("RSVPCog initialized and tasks started.")
 
-    @tasks.loop(seconds=59)
+    @tasks.loop(seconds=9)
     async def update_status_task(self):
         """Update bot status to reflect reminder loop and SQL connection status."""
         try:
             # Check reminder loop status
-            reminder_status = "🟢" if self.reminder_task.is_running() else "🔴"
+            reminder_status = "🔔" if self.reminder_task.is_running() else "🔕"
 
             # Check SQL connection status
             try:
                 self.bot.conn.ping(reconnect=True, attempts=3, delay=5)
-                sql_status = "✅"
+                sql_status = "📊"
             except Exception as e:
-                sql_status = "❌"
+                sql_status = "⚠️"
                 print(f"[SQL Connection Check] Failed: {e}")
 
             # Alternate status display
