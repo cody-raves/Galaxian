@@ -109,7 +109,7 @@ class EventCog(commands.Cog):
     @commands.command(name="newevent")
     @commands.has_role("promoter")
     async def new_event(self, ctx):
-        events_channel_id = 1306918418116771892  # Replace with your events channel ID
+        events_channel_id = 1325380437048299593  # Replace with your events channel ID
         is_admin = ctx.author.guild_permissions.administrator
 
         # Determine where to post the final embed
