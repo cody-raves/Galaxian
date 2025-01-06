@@ -10,10 +10,12 @@ _A Discord bot for managing underground rave events, invites, and RSVP's – act
 - Handles all invites related to the server.
 - Limits users to **one invite per 30 days** by reacting to a central embed.
 - Each invite is a **one-time use only**.
+- `Admin` Role can **bypass 30 day limits**.
 
 ### **Events**
-- Users with the "Promoter" role can use the `!newevent` command.
-- A private channel is created to ask all relevant questions before posting the event embed.
+- Users with the "Promoter" role can use the `!newevent` command in channel `events`.
+- Anything typed in channel `events` gets deleted instantly if its not the command `!newevent` .
+- A private channel is created to ask all relevant questions before posting the event embed when `!newevents` is triggered.
 
 ### **RSVPs**
 - All event posts have reaction-based RSVP functionality.
