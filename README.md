@@ -16,7 +16,7 @@ _A Discord bot for managing underground rave events, invites, and RSVP's – act
 - Users with the "Promoter" role can use the `!newevent` command in channel `events`.
 - Anything typed in channel `events` gets deleted instantly if its not the command `!newevent` .
 - A private channel is created to ask all relevant questions before posting the event embed when `!newevents` is triggered.
-- After and event's end time the emebeds are auto deleted from the `events` channel.
+- After an event ends the emebed is auto deleted from the `events` channel.
 
 ### **RSVPs**
 - All event posts have reaction-based RSVP functionality.
