@@ -12,6 +12,7 @@ class RSVPCog(commands.Cog):
         self.bot = bot
         self.reminders = []  # List of reminders: [(reminder_time, channel_id, message_id, event_data)]
         self.event_messages = {}  # Track event embeds (message_id -> channel_id)
+        # Start tasks
 
         try:
             print("Attempting to start reminder task...")
@@ -59,7 +60,50 @@ class RSVPCog(commands.Cog):
             print(f"Failed to start status update task: {e}")
 
         print("RSVPCog initialized and tasks started.")
+    
+    async def sync_reactions_on_startup(self):
+        """Check existing messages for reactions and silently update RSVPs."""
+        cursor = self.bot.conn.cursor()
+        cursor.execute("""
+            SELECT message_id, channel_id, event_id FROM events 
+            WHERE reminder_sent = 0 AND event_date >= CURRENT_DATE()
+        """)
+        events = cursor.fetchall()
+        print(f"Found {len(events)} events to process for RSVP synchronization.")
+        for event in events:
+            message_id, channel_id, event_id = event
+            channel = self.bot.get_channel(channel_id)
+            if channel:
+                try:
+                    message = await channel.fetch_message(message_id)
+                    for reaction in message.reactions:
+                        if str(reaction.emoji) == '✅':  # Checking for the RSVP emoji
+                            async for user in reaction.users():
+                                if not user.bot:
+                                    await self.add_rsvp_if_not_exists(event_id, user.id, silent=True)
+                except discord.NotFound:
+                    print(f"Message {message_id} not found in channel {channel_id}.")
+                except Exception as e:
+                    print(f"Error processing reactions for message {message_id}: {e}")
 
+    async def add_rsvp_if_not_exists(self, event_id, user_id, silent=False):
+        """Add an RSVP for a user if it doesn't already exist, optionally silently."""
+        cursor = self.bot.conn.cursor()
+        cursor.execute("SELECT 1 FROM rsvp_users WHERE event_id = %s AND user_id = %s", (event_id, user_id))
+        if cursor.fetchone() is None:
+            cursor.execute("INSERT INTO rsvp_users (event_id, user_id, rsvp_time) VALUES (%s, %s, %s)", 
+                           (event_id, user_id, datetime.now(UTC)))
+            self.bot.conn.commit()
+            if not silent:
+                user = self.bot.get_user(user_id)
+                if user:
+                    try:
+                        await user.send("Thank you for RSVPing to the event!")
+                    except discord.Forbidden:
+                        print(f"Could not send DM to {user_id}.")
+            else:
+                print(f"Silently added RSVP for user {user_id} to event {event_id}.")
+        
     @tasks.loop(seconds=9)
     async def update_status_task(self):
         """Update bot status to reflect reminder loop and SQL connection status."""
@@ -306,10 +350,13 @@ class RSVPCog(commands.Cog):
         try:
             print("Monitoring for new events...")
             cursor = self.bot.conn.cursor(dictionary=True)
-            cursor.execute("""
+            existing_ids = tuple(self.event_messages.keys())
+            placeholder = ', '.join(['%s'] * len(existing_ids)) if existing_ids else 'NULL'
+            query = f"""
                 SELECT * FROM events
-                WHERE reminder_sent = false AND message_id NOT IN (%s)
-            """, (tuple(self.event_messages.keys()) or (0,)))
+                WHERE reminder_sent = false AND message_id NOT IN ({placeholder})
+            """
+            cursor.execute(query, existing_ids if existing_ids else ())
             events = cursor.fetchall()
 
             for event in events:

@@ -150,7 +150,6 @@ class EventCog(commands.Cog):
                 await event_channel.send(f"Invalid response. Please choose from: {', '.join(valid_responses)}.")
 
         try:
-            # Collect event details
             msg = await ask_question("Let's set up your event! Please provide the name of the party:")
             event_data["name"] = msg.content
 
@@ -188,37 +187,41 @@ class EventCog(commands.Cog):
             while True:
                 msg = await ask_question("Please provide the start time of the event (e.g., 12am or 1:30am) in PST:")
                 try:
-                    # Parse the time input and combine it with the event date
                     naive_start_time = datetime.combine(event_data["date"], self.parse_time(msg.content))
-                    
-                    # Ensure the time is explicitly localized to PST
                     start_time_pst = PST.localize(naive_start_time)
-                    
-                    # Store both the PST and UTC times for clarity
-                    event_data["start_time"] = start_time_pst.astimezone(UTC)  # Convert to UTC for storage
-                    print(f"Debug Start Time (PST): {start_time_pst}")
-                    print(f"Debug Start Time (UTC): {event_data['start_time']}")
+                    event_data["start_time"] = start_time_pst.astimezone(UTC)
                     break
                 except ValueError:
                     await event_channel.send("Invalid time format. Please use formats like 12am, 1:30am.")
 
-            while True:  # Loop for end time
-                msg = await ask_question("Please provide the end time of the event (e.g., 12pm or 1:30am) in PST:")
-                try:
-                    # Parse the time input and combine it with the event date
-                    naive_end_time = datetime.combine(event_data["date"], self.parse_time(msg.content))
-                    end_time_pst = PST.localize(naive_end_time)
-                    
-                    # Handle overnight events
-                    if end_time_pst <= start_time_pst:
-                        end_time_pst += timedelta(days=1)
-                    
-                    event_data["end_time"] = end_time_pst.astimezone(UTC)  # Convert to UTC for storage
-                    print(f"Debug End Time (PST): {end_time_pst}")
-                    print(f"Debug End Time (UTC): {event_data['end_time']}")
-                    break
-                except ValueError:
-                    await event_channel.send("Invalid time format. Please use formats like 12pm, 1:30am.")
+            msg = await ask_question("Is this a multi-day event? Reply with 'yes' or 'no'.", valid_responses=["yes", "no"])
+            if msg.content.strip().lower() == "yes":
+                while True:
+                    msg = await ask_question("How many days will the event last?")
+                    try:
+                        num_days = int(msg.content.strip())
+                        if num_days < 1:
+                            await event_channel.send("The event must last at least one day. Please provide a valid number of days.")
+                        else:
+                            event_data["multi_day"] = True
+                            end_date = event_data["date"] + timedelta(days=num_days - 1)
+                            event_data["end_date"] = end_date
+                            event_data["end_time"] = datetime.combine(end_date, datetime.min.time()).astimezone(UTC)
+                            break
+                    except ValueError:
+                        await event_channel.send("Please enter a valid number of days.")
+            else:
+                while True:
+                    msg = await ask_question("Please provide the end time of the event (e.g., 12pm or 1:30am) in PST:")
+                    try:
+                        naive_end_time = datetime.combine(event_data["date"], self.parse_time(msg.content))
+                        end_time_pst = PST.localize(naive_end_time)
+                        if end_time_pst <= start_time_pst:
+                            end_time_pst += timedelta(days=1)
+                        event_data["end_time"] = end_time_pst.astimezone(UTC)
+                        break
+                    except ValueError:
+                        await event_channel.send("Invalid time format. Please use formats like 12pm, 1:30am.")
 
             age_requirements = ["18+", "21+", "All Ages"]
             msg = await ask_question("What is the age requirement? (18+, 21+, All Ages)", valid_responses=age_requirements)
@@ -238,39 +241,23 @@ class EventCog(commands.Cog):
             msg = await ask_question("What type of event is this? (e.g., club, renegade, underground, day party, campout, festival)")
             event_data["type"] = msg.content
 
-            # Ask for reminder time
             msg = await ask_question("When should we send a reminder? (e.g., 2 hours, 30 minutes):")
             while True:
                 try:
-                    # Split input into value and unit
                     time_parts = msg.content.lower().split()
                     if len(time_parts) != 2:
                         raise ValueError("Invalid format")
-
-                    time_value = int(time_parts[0])  # First part should be an integer
-                    time_unit = time_parts[1]  # Second part should be a time unit
-
-                    # Check the time unit and calculate the delta
+                    time_value = int(time_parts[0])
+                    time_unit = time_parts[1]
                     if "hour" in time_unit:
                         reminder_delta = timedelta(hours=time_value)
-                    elif "min" in time_unit or "minute" in time_unit:
+                    elif "min" in time_unit:
                         reminder_delta = timedelta(minutes=time_value)
                     else:
                         raise ValueError("Invalid time unit")
-
-                    # Directly use the stored start_time (already in UTC)
                     start_time_utc = event_data["start_time"]
-
-                    # Calculate UTC reminder time
                     reminder_time_utc = start_time_utc - reminder_delta
                     current_time_utc = datetime.now(UTC)
-
-                    # Debugging logs
-                    print(f"Start Time (UTC): {start_time_utc}")
-                    print(f"Reminder Delta: {reminder_delta}")
-                    print(f"Reminder Time (UTC): {reminder_time_utc}")
-                    print(f"Current Time (UTC): {current_time_utc}")
-
                     if reminder_time_utc <= current_time_utc:
                         await event_channel.send("Reminder time must be in the future. Please provide a valid time.")
                         msg = await ask_question("When should we send a reminder? (e.g., 2 hours, 30 minutes):")
@@ -281,7 +268,6 @@ class EventCog(commands.Cog):
                     await event_channel.send("Invalid format. Please provide a valid time (e.g., '2 hours', '30 minutes').")
                     msg = await ask_question("When should we send a reminder? (e.g., 2 hours, 30 minutes):")
 
-            # Create an event embed preview
             embed = discord.Embed(
                 title=f"{event_data['name']} hosted by {event_data['crew_name']}",
                 description="Performing Acts:\n" + "\n".join(event_data["acts"]),
@@ -293,6 +279,8 @@ class EventCog(commands.Cog):
             embed.add_field(name="Location", value=event_data["location"], inline=True)
             embed.add_field(name="Type", value=event_data["type"], inline=True)
             embed.add_field(name="Date", value=event_data["date"].strftime("%m-%d-%Y"), inline=True)
+            start_time_pst = event_data["start_time"].astimezone(PST)
+            end_time_pst = event_data["end_time"].astimezone(PST)
             embed.add_field(name="Time", value=f"{start_time_pst.strftime('%I:%M %p')} - {end_time_pst.strftime('%I:%M %p')} PST", inline=True)
             embed.add_field(name="Age Requirement", value=event_data["age_requirement"], inline=True)
             embed.add_field(name="Cover Fee", value=event_data["cover_fee"], inline=True)
@@ -303,11 +291,9 @@ class EventCog(commands.Cog):
             )
             embed.set_footer(text="Hosted by Your Discord Server")
 
-            # Show preview to promoter
             await event_channel.send("Here is a preview of your event post:")
             preview_message = await event_channel.send(embed=embed)
 
-            # Ask for confirmation to post
             msg = await ask_question(
                 "All set! Reply with 'confirm' to post the event, 'edit' to restart, or 'cancel' to abort.",
                 valid_responses=["confirm", "edit", "cancel"]
@@ -322,11 +308,9 @@ class EventCog(commands.Cog):
                 await self.new_event(ctx)
                 return
 
-            # Post event publicly
             final_message = await post_channel.send(embed=embed)
             await final_message.add_reaction("\u2705")
-            
-            # Save to database
+
             cursor = self.bot.conn.cursor()
             try:
                 cursor.execute('''
@@ -338,29 +322,21 @@ class EventCog(commands.Cog):
                     event_data["cover_fee"], event_data["info"], event_data["type"], event_data["reminder_time"], final_message.id, post_channel.id
                 ))
                 self.bot.conn.commit()
-                print(f"Event saved to database: {event_data['name']} (Message ID: {final_message.id})")
             except Exception as e:
                 print(f"Failed to save event to database: {e}")
 
-            # Fetch the event_id of the newly created event
-            cursor = self.bot.conn.cursor(dictionary=True)  # Use dictionary=True for row dictionaries
+            cursor = self.bot.conn.cursor(dictionary=True)
             cursor.execute("""
                 SELECT event_id FROM events
                 WHERE message_id = %s
             """, (final_message.id,))
             result = cursor.fetchone()
-
             if not result:
                 raise ValueError(f"Failed to fetch event_id for message_id: {final_message.id}")
-
-            event_id = result["event_id"]  # Access event_id using dictionary key
-
-            # Update the event_data dictionary with the event_id
+            event_id = result["event_id"]
             event_data["event_id"] = event_id
 
             await event_channel.delete()
-
-            # Dynamically register the event with the RSVP cog
             await self.bot.rsvp_cog.register_event(
                 message_id=final_message.id,
                 channel_id=post_channel.id,
@@ -368,7 +344,6 @@ class EventCog(commands.Cog):
                 event_data=event_data,
             )
 
-            # Send DM to promoter
             try:
                 await ctx.author.send("Your event has been posted! Here is the final version:")
                 await ctx.author.send(embed=embed)

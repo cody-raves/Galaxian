@@ -156,6 +156,14 @@ async def on_ready():
     # Load cogs dynamically
     await load_cogs()
 
+    # Check if RSVPCog is loaded and run initialization tasks
+    rsvp_cog = bot.get_cog('RSVPCog')
+    if rsvp_cog:
+        await rsvp_cog.load_rsvp_events()
+        await rsvp_cog.sync_reactions_on_startup()
+
+    print("All systems are go!")
+
 @bot.event
 async def on_disconnect():
     conn.close()
